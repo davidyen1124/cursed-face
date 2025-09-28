@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NOTION FACES — CURSED EDITION</title>
+  <style>
+    :root {
+      --bg: #fefefe; /* go brutalist light by default */
+      --fg: #111;
+      --accent: #ff00a8;
+    }
+    html, body { height: 100%; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      letter-spacing: .015em;
+    }
+    header {
+      position: fixed; inset: 0 0 auto 0; z-index: 2;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px; border-bottom: 3px solid var(--fg);
+      background: var(--bg);
+    }
+    header .brand {
+      font-weight: 900; font-size: 14px; text-transform: uppercase;
+      /* Prevent wrapping and gracefully truncate if tight */
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      min-width: 0; margin-right: 12px; flex: 1 1 auto;
+    }
+    /* Right-side actions: stack buttons vertically with spacing */
+    header .actions {
+      display: flex; flex-direction: column; align-items: flex-end;
+      gap: 8px; flex: 0 0 auto;
+    }
+    header .btn {
+      appearance: none; background: var(--fg); color: var(--bg);
+      border: 3px solid var(--fg); padding: 8px 10px; cursor: pointer;
+      font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+    }
+    header .btn:active { transform: translate(1px,1px); }
+    /* Stage fills the viewport below the header */
+    #stage { position: fixed; left: 0; right: 0; bottom: 0; top: var(--header-h, 0px); display: grid; }
+    canvas { width: 100vw; height: calc(100vh - var(--header-h, 0px)); display: block; }
+    /* Prefer dynamic viewport height on browsers that support it (iOS Safari) */
+    @supports (height: 100dvh) {
+      canvas { height: calc(100dvh - var(--header-h, 0px)); }
+    }
+    .accent { color: var(--accent); }
+
+    /* Loading overlay */
+    #loading { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+    #loading .label {
+      border: 4px solid var(--fg); background: var(--bg); color: var(--fg);
+      padding: 10px 14px; font-weight: 900; text-transform: uppercase;
+      letter-spacing: .08em; box-shadow: 8px 8px 0 var(--fg);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">NOTION FACES — <span class="accent">CURSED EDITION</span></div>
+    <div class="actions">
+      <button id="reroll" class="btn">Reroll</button>
+      <button id="download" class="btn">Download</button>
+    </div>
+  </header>
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div id="loading"><div class="label">Loading…</div></div>
+  </div>
+  <script>
+  // ——————————————————————————————————————————————
+  // Cursed Face Generator (client-side)
+  // ——————————————————————————————————————————————
+  const CDN = 'https://faces.notion.com/layers';
+  const W = 1200, H = 1200; // native part size
+
+  // Layer paint order mirrors the real app (bottom → top)
+  const ORDER = ['skintone','nose','hair','mouth','eyewear','eyes','accessory','brows'];
+
+  // Conservative id ranges that exist widely; we retry on 404s
+  const RANGES = {
+    skintone: [1, 9],
+    eyes:     [1, 40],
+    eyewear:  [1, 30],
+    brows:    [1, 50],
+    nose:     [1, 80],
+    mouth:    [1, 80],
+    hair:     [1, 220],
+    accessory:[1, 16],
+  };
+
+  const randInt = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
+  const pickIn = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  const chance = (p) => Math.random() < p; // p in [0..1]
+
+  // Load image with CORS so we can draw it
+  function loadLayer(category, id) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('load-failed'));
+      img.src = `${CDN}/${category}/${id}.png`;
+    });
+  }
+
+  async function pickExisting(category, tries = 20) {
+    const [lo, hi] = RANGES[category];
+    for (let i=0; i<tries; i++) {
+      const id = randInt(lo, hi);
+      try {
+        const img = await loadLayer(category, id);
+        return { id, img };
+      } catch (_) {}
+    }
+    return null; // give up
+  }
+
+  // Build a one-per-category selection and give each layer a random rotation
+  const ANGLES = { skintone: 2, eyes: 18, eyewear: 25, brows: 15, nose: 10, mouth: 16, hair: 12, accessory: 25 };
+  const deg2rad = d => d * Math.PI / 180;
+  const randAngle = cat => deg2rad((Math.random()*2 - 1) * (ANGLES[cat] || 10));
+
+  async function randomSelection() {
+    const sel = {};
+    // Base skintone
+    const skin = await pickExisting('skintone');
+    sel.skintone = skin ? [{ id: skin.id, dx: 0, dy: 0, angle: randAngle('skintone') }] : [];
+
+    // Core features (single each)
+    for (const cat of ['eyes','brows','nose','mouth','hair']) {
+      const hit = await pickExisting(cat);
+      if (hit) sel[cat] = [{ id: hit.id, dx: 0, dy: 0, angle: randAngle(cat) }];
+    }
+
+    // Eyewear and accessory (single each)
+    const eyeW = await pickExisting('eyewear');
+    if (eyeW) sel.eyewear = [{ id: eyeW.id, dx: 0, dy: 0, angle: randAngle('eyewear') }];
+    const acc = await pickExisting('accessory');
+    if (acc) sel.accessory = [{ id: acc.id, dx: 0, dy: 0, angle: randAngle('accessory') }];
+
+    return sel;
+  }
+
+  async function loadAll(sel) {
+    // Return a map: {category: [{img, dx, dy}, ...]}
+    const out = {};
+    for (const cat of Object.keys(sel)) {
+      out[cat] = [];
+      for (const item of sel[cat]) {
+        try {
+          const img = await loadLayer(cat, item.id);
+          out[cat].push({ img, dx: item.dx||0, dy: item.dy||0, angle: item.angle||0, id: item.id });
+        } catch (_) {}
+      }
+    }
+    return out;
+  }
+
+  function setupCanvas(canvas) {
+    const ctx = canvas.getContext('2d');
+    const DPR = Math.max(1, window.devicePixelRatio || 1);
+    function resize() {
+      const header = document.querySelector('header');
+      const headerH = header ? Math.ceil(header.getBoundingClientRect().height) : 0;
+      // Expose to CSS so stage/canvas position below header
+      document.documentElement.style.setProperty('--header-h', headerH + 'px');
+      const vw = Math.max(1, window.innerWidth);
+      const vhAvail = Math.max(1, window.innerHeight - headerH);
+      canvas.width = Math.floor(vw * DPR);
+      canvas.height = Math.floor(vhAvail * DPR);
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      render.lastSize = { vw, vh: vhAvail };
+      // If we already have a composed image, repaint it after resizing.
+      if (render.off) {
+        drawContain(ctx, canvas, render.off);
+      }
+    }
+    window.addEventListener('resize', resize);
+    resize();
+    return ctx;
+  }
+
+  function drawContain(ctx, canvas, img) {
+    const { vw, vh } = render.lastSize;
+    const scale = Math.min(vw / W, vh / H);
+    const dx = (vw - W * scale) / 2;
+    const dy = (vh - H * scale) / 2;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, W, H, dx, dy, W*scale, H*scale);
+  }
+
+  const $loading = document.getElementById('loading');
+  function setLoading(visible, msg) {
+    if (msg) {
+      const lbl = $loading.querySelector('.label');
+      if (lbl) lbl.textContent = msg;
+    }
+    $loading.style.display = visible ? 'grid' : 'none';
+  }
+
+  async function render() {
+    const canvas = document.getElementById('c');
+    const ctx = render.ctx || (render.ctx = setupCanvas(canvas));
+    ctx.clearRect(0,0,canvas.width, canvas.height);
+
+    // Compose offscreen at native size
+    const off = document.createElement('canvas');
+    off.width = W; off.height = H;
+    const octx = off.getContext('2d');
+
+    setLoading(true, 'Loading…');
+    const sel = await randomSelection();
+    const layers = await loadAll(sel);
+
+    // Paint by ORDER; rotate each layer around canvas center
+    for (const cat of ORDER) {
+      const items = layers[cat] || [];
+      for (const {img, dx, dy, angle} of items) {
+        const cx = W/2, cy = H/2;
+        octx.save();
+        octx.translate(cx + dx, cy + dy);
+        if (angle) octx.rotate(angle);
+        octx.drawImage(img, -cx, -cy);
+        octx.restore();
+      }
+    }
+
+    drawContain(ctx, canvas, off);
+
+    // Keep a handle to the last composed face for download
+    render.off = off;
+
+    // Hide loader after painting
+    setLoading(false);
+  }
+
+  document.getElementById('reroll').addEventListener('click', () => { render(); });
+
+  document.getElementById('download').addEventListener('click', async () => {
+    // If no composed image yet, render once.
+    if (!render.off) {
+      setLoading(true, 'Preparing…');
+      await render();
+    }
+    try {
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      a.download = `cursed-face-${stamp}.png`;
+      a.href = render.off.toDataURL('image/png');
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  // Kick off once loaded
+  window.addEventListener('load', () => { render(); });
+  </script>
+</body>
+</html>
