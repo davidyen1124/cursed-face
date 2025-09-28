@@ -20,7 +20,3 @@ What’s here
 Fine print
 - Needs internet to fetch facial bits.
 - No install. No build. Only vibes.
-
-## Notes
-- This repo was intentionally simplified to a single file per your request.
-- No license included here; add one if you plan to distribute.
