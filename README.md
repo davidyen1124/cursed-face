@@ -1,6 +1,6 @@
 # Cursed Face Machine
 
-![A freshly conjured goblin](screenshot.png)
+<img src="screenshot.png" alt="A freshly conjured goblin" width="420">
 
 One file. Infinite gremlins. Zero dignity. Maximum eyebrows.
 
